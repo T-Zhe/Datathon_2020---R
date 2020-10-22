@@ -1,0 +1,254 @@
+---
+title: "Medical Insurance Fraud Investigation - Datathon"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r}
+library(RColorBrewer)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(randomForest)
+library(tidyverse)
+library(ggplot2)
+library(MASS)
+library(corrplot)
+library(Hmisc)
+library(dplyr) 
+library(e1071)
+library(pROC)
+library(caret)
+library(ggcorrplot)
+library(GGally)
+library(VIM)
+library(caret)
+library(mlbench)
+library(mice)
+library(DMwR)
+library(ROCR)
+library(gmodels)
+```
+
+
+## Data Importing
+```{r}
+
+inpatients <- read_excel("~/Desktop/Datathon/inpatients.xlsx")
+
+
+outpatients <- read_excel("~/Desktop/Datathon/outpatients.xlsx")
+
+
+providers <- read_excel("~/Desktop/Datathon/providers.xlsx")
+```
+
+## Data Overview
+```{r}
+# Summary
+summary(inpatients)
+summary(outpatients)
+summary(providers)
+
+# Attributes
+names(inpatients)
+names(outpatients)
+names(providers)
+
+# First 6 rows of dataset
+head(inpatients)
+head(outpatients)
+head(providers)
+
+# Descriptive Statistics
+describe(inpatients)
+describe(outpatients)
+describe(providers)
+
+# Structure
+str(inpatients)
+str(outpatients)
+str(providers)
+
+# Dimensions
+dim(inpatients)
+dim(outpatients)
+dim(providers)
+
+# Type of data
+class(inpatients)
+class(outpatients)
+class(providers)
+
+# Checking classes of attributes
+sapply(inpatients,class)
+sapply(inpatients, levels)
+
+sapply(outpatients,class)
+sapply(outpatients, levels)
+
+sapply(providers,class)
+sapply(providers, levels)
+```
+
+## Merging Data
+```{r}
+
+outpatients = subset(outpatients, select = -c(StartDt, EndDt,AttendingPhysician,OperatingPhysician,OtherPhysician,DiagnosisCode_1,DiagnosisCode_2,DiagnosisCode_3,DiagnosisCode_4,DiagnosisCode_5,DiagnosisCode_6,DiagnosisCode_7,DiagnosisCode_8,DiagnosisCode_9,DiagnosisCode_10,ProcedureCode_1,ProcedureCode_2,ProcedureCode_3,ProcedureCode_4,ProcedureCode_5,ProcedureCode_6,AdmitDiagnosisCode) )
+
+inpatients = subset(inpatients, select = -c(StartDt, EndDt, AdmissionDt, DischargeDt, AttendingPhysician,OperatingPhysician,OtherPhysician,AdmitDiagnosisCode,DiagnosisGroupCode,DiagnosisCode_1,DiagnosisCode_2,DiagnosisCode_3,DiagnosisCode_4,DiagnosisCode_5,DiagnosisCode_6,DiagnosisCode_7,DiagnosisCode_8,DiagnosisCode_9,DiagnosisCode_10,ProcedureCode_1,ProcedureCode_2,ProcedureCode_3,ProcedureCode_4,ProcedureCode_5,ProcedureCode_6) )
+
+outpatients_names_factor <- c('PID' ,'BID', 'CID')
+outpatients[,outpatients_names_factor] <- lapply(outpatients[,outpatients_names_factor] , factor)
+str(outpatients)
+
+inpatients_names_factor <- c('PID' ,'BID', 'CID')
+inpatients[,inpatients_names_factor] <- lapply(inpatients[,inpatients_names_factor] , factor)
+
+char_vector <- as.character(inpatients$DeductibleAmt)
+str(char_vector)
+num_vector <- as.numeric(char_vector)
+
+# data merging
+data.inpatients = merge(inpatients, providers, by = "PID")
+
+data.outpatients = merge(outpatients, providers, by = "PID")
+
+# sampling
+data.inpatients.sample = data.inpatients[sample(nrow(data.inpatients), 5410), ]
+dim(data.inpatients.sample)
+
+
+data.outpatients.sample = data.outpatients[sample(nrow(data.outpatients), 5410), ]
+dim(data.outpatients.sample)
+```
+
+# Correlation Analysis
+```{r}
+ggpairs(data.outpatients.sample)
+
+```
+
+
+## Data Validation & Cleaning 
+```{r}
+#Number of missing values
+sapply(data.inpatients.sample, function(x) sum(is.na(x)))
+sapply(data.outpatients.sample, function(x) sum(is.na(x)))
+
+#Impute
+impute_inpatients = mice(data.inpatients.sample, m=5, seed = 123)
+print(impute)
+
+impute_outpatients = mice(data.outpatients.sample, m=5, seed = 123)
+print(impute)
+
+#Compute
+completedData_inpatients = complete(impute_inpatients, 1)
+
+#Compute
+completedData_outpatients = complete(impute_outpatients, 1)
+
+# Number of duplicate rows
+sum(duplicated(data.inpatients.sample))
+
+# Number of duplicate rows
+sum(duplicated(data.outpatients.sample))
+
+
+#Target vairable visualization
+fraud_inpatients = table(data.inpatients.sample$Fraud) 
+barplot(fraud_inpatients,col=brewer.pal(2,"Set1"))
+fraud_inpatients
+prop.table(table(data.inpatients.sample$Fraud))
+
+#Target vairable visualization
+fraud_outpatients = table(data.outpatients.sample$Fraud) 
+barplot(fraud_outpatients,col=brewer.pal(2,"Set1"))
+fraud_outpatients 
+prop.table(table(data.outpatients.sample$Fraud))
+
+
+data.inpatients.sample$Fraud = as.factor(ifelse(data.inpatients.sample$Fraud == 'Yes', 0, 1))
+table(data.inpatients.sample$Fraud)
+
+data.outpatients.sample$Fraud = as.factor(ifelse(data.outpatients.sample$Fraud == 'Yes', 0, 1))
+table(data.outpatients.sample$Fraud)
+```
+
+
+## Data Normalization & Pre-Processing 
+```{r}
+#Centering and scaling data
+#preProcValues_inpatients = preProcess(data.inpatients.sample, method = c("center", "scale"))
+#finaldataNormalized_inpatients = predict(preProcValues_inpatients, data.inpatients.sample)
+#str(finaldataNormalized_inpatients)
+#table(finaldataNormalized_inpatients$Fraud)
+
+#Centering and scaling data
+#preProcValues_outpatients = preProcess(data.outpatients.sample, method = c("center", "scale"))
+#finaldataNormalized_outpatients = predict(preProcValues_outpatients, data.outpatients.sample)
+#str(finaldataNormalized_outpatients)
+#table(finaldataNormalized_outpatients$Fraud)
+```
+
+## Split Dataset
+```{r}
+#Data Partition for Full Dataset (Training & Testing)
+set.seed(1234)
+ind = sample(2, nrow(data.inpatients.sample), replace = T, prob = c(0.8, 0.2))
+train = data.inpatients.sample[ind==1,]
+test = data.inpatients.sample[ind==2,]
+```
+
+
+## Model Development
+```{r}
+
+# Logistic Regression
+mymodel = glm(Fraud ~ AmtReimbursed, data = data.outpatients.sample, family = 'binomial')
+
+p1 = predict(mymodel, train, type = 'response')
+head(p1)
+head(train)
+
+#train
+pred1 = ifelse(p1>0.5, 0, 1)
+tab1 = table(Predicted = pred1, Acutal = train$Fraud)
+tab1
+
+1 - sum(diag(tab1))/sum(tab1)
+
+#test
+p2 = predict(mymodel, test, type = 'response')
+pred2 = ifelse(p2>0.5, 0, 1)
+tab2 = table(Predicted = pred2, Actual = test$Fraud)
+tab2
+
+1 - sum(diag(tab2))/sum(tab2)
+
+
+# random forest
+
+rf = randomForest(Fraud~ AmtReimbursed, data = train)
+p3 = predict(rf, train)
+
+#train
+confusionMatrix(p3, train)
+
+1 - sum(diag(tab2))/sum(tab2)
+
+#test
+p4 = predict(rf, test)
+confusionMatrix(p4, test$Fraud)
+
+1 - sum(diag(tab2))/sum(tab2)
+```
